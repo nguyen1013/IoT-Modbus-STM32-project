@@ -1,0 +1,78 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+*.srec
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+*.dmp
+*.sym
+
+# Build directories
+build/
+Debug/
+Release/
+bin/
+obj/
+out/
+
+# STM32CubeIDE / Eclipse
+.settings/
+.metadata/
+*.launch
+*.project
+*.cproject
+
+# STM32CubeMX
+*.ioc-backup
+MX_*/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Kernel Module Compile Results (optional)
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
