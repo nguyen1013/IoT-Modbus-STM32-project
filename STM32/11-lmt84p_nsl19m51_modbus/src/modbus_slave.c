@@ -4,7 +4,7 @@
 #include "timer.h"
 #include "usart2.h"
 
-#define MODBUS_FRAME_SIZE 8
+#define MODBUS_FRAME_SIZE 9
 
 void blink_led();
 #define led_on()	GPIOA->ODR|=0x20; //0010 0000 set bit 5. p186
@@ -60,83 +60,76 @@ unsigned short int CRC16 (char *nData,unsigned short int wLength)
 
 }
 
-void wrong_slave_address(void)
+void read_modbus_frame(uint8_t *rx_buf, uint8_t length)
 {
-    USART1->CR1 &= ~0x00000004;    // RE bit. Disable receiver
-    delay_ms(10);                  // wait ~7.29ms for 7-byte frame
-    USART1->CR1 |= 0x00000004;     // RE bit. Enable receiver
-    USART1->CR1 |= 0x0020;         // enable RX interrupt
-}
-
-void read_7_bytes_from_usartx(char *received_frame)
-{
-    char frame[8] = {0};
-    uint8_t i = 0;
-
-    while(i < 7)
+    for (uint8_t i = 0; i < length; i++)
     {
-        *received_frame = USART1_read();
-        frame[i] = *received_frame;
-        received_frame++;
-        i++;
+        rx_buf[i] = USART1_read();
     }
-    write_debug_frame(frame, 8);
+
+    write_debug_frame(rx_buf, length);
 }
 
 void respond_frame(uint8_t slave_addr, int32_t sensor_value)
 {
-    GPIOA->ODR |= 0x20;  // led on, transmitting mode
+    uint8_t frame[MODBUS_FRAME_SIZE] = {0};
 
-    uint8_t respond_frame[7] = {0};
-    respond_frame[0] = slave_addr;
-    respond_frame[1] = 0x04;  // function code
-    respond_frame[2] = 0x02;  // byte count
+    led_on();   // TX indication
 
-    // Sensor value high and low bytes
-    respond_frame[3] = (sensor_value >> 8) & 0xFF;  // high byte
-    respond_frame[4] = sensor_value & 0xFF;         // low byte
+    frame[0] = slave_addr;
+    frame[1] = 0x04;  // Read Input Registers
+    frame[2] = 0x04;  // 4 data bytes (2 registers)
 
-    // CRC
-    unsigned short int crc = CRC16((char*)respond_frame, 5);
-    respond_frame[5] = crc & 0xFF;         // CRC low byte
-    respond_frame[6] = (crc >> 8) & 0xFF;  // CRC high byte
+    /* Big-endian 32-bit value (Modbus standard) */
+    frame[3] = (sensor_value >> 24) & 0xFF;
+    frame[4] = (sensor_value >> 16) & 0xFF;
+    frame[5] = (sensor_value >> 8)  & 0xFF;
+    frame[6] =  sensor_value        & 0xFF;
 
-    // Send frame
-    for(uint8_t i = 0; i < 7; i++)
+    uint16_t crc = CRC16((char *)frame, 7);
+    frame[7] = crc & 0xFF;       // CRC low
+    frame[8] = crc >> 8;         // CRC high
+
+    for (uint8_t i = 0; i < MODBUS_FRAME_SIZE; i++)
     {
-        blink_led();
-        USART1_write(respond_frame[i]);
+        USART1_write(frame[i]);
     }
 
-    GPIOA->ODR &= ~0x20;  // led off, receiving mode
+    led_off();  // RX mode
 }
 
-void write_debug_msg(char *str, int32_t maxchars)
+void write_debug_msg(const char *str, int32_t maxchars)
 {
     int32_t i = 0;
-    while(str[i] != '\0') {
-        USART2_write(str[i]);
-        if (++i == maxchars)
-            break;
+    while (str[i] != '\0' && i < maxchars)
+    {
+        USART2_write(str[i++]);
     }
     USART2_write('\r');
     USART2_write('\n');
 }
 
-char bytestr[] = {'0', '1', '2', '3', '4','5','6','7','8','9','a','b','c','d','e','f'};
-
-void write_debug_frame(char *str, int32_t maxchars)
+static const char bytestr[] =
 {
-    USART2_WriteString("read 7 bytes from usartx: ");
+    '0','1','2','3','4','5','6','7',
+    '8','9','a','b','c','d','e','f'
+};
 
-    int32_t i;
-    for (i = 0; i < 8; i++) {
+void write_debug_frame(const uint8_t *frame, uint8_t length)
+{
+    USART2_WriteString("RX frame: ");
+
+    for (uint8_t i = 0; i < length; i++)
+    {
         USART2_write('0');
         USART2_write('x');
-        USART2_write(bytestr[(str[i] & 0xf0) >> 4]);
-        USART2_write(bytestr[str[i] & 0x0f]);
-        USART2_write(44); // comma
+        USART2_write(bytestr[(frame[i] >> 4) & 0x0F]);
+        USART2_write(bytestr[frame[i] & 0x0F]);
+
+        if (i < length - 1)
+            USART2_write(',');
     }
+
     USART2_write('\r');
     USART2_write('\n');
 }
@@ -144,23 +137,7 @@ void write_debug_frame(char *str, int32_t maxchars)
 /**
  * Initialize LED
  */
-void LED_Init()
+void LED_Init(void)
 {
 	GPIOA->MODER|=0x400; //GPIOA pin 5 to output. p184
 }
-
-uint8_t led_value = 0;
-
-/**
- * Just turn led on/off, depending on previous state
- */
-void blink_led()
-{
-	if (!led_value) {
-		led_on();
-	} else {
-		led_off();
-	}
-	led_value = !led_value;
-}
-

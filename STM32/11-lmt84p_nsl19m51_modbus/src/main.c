@@ -29,7 +29,7 @@ volatile uint8_t neFlag = 0;
 volatile uint8_t frameFlag = 0;
 
 /*
- * Clear buffer. This is used only for receiver buffer, hence fixed size (8 bytes)
+ * Clear buffer
  */
 void clear_buffer(char *b)
 {
@@ -48,86 +48,80 @@ int main(void)
 {
 	__disable_irq();			//global disable IRQs, M3_Generic_User_Guide p135.
 	/* Configure the system clock to 32 MHz and update SystemCoreClock */
-	SetSysClock();
-	SystemCoreClockUpdate();
+    SetSysClock();
+    SystemCoreClockUpdate();
 
-	USART1_Init(); // ModBus
-	USART2_Init(); // Used as debugging terminal
-	ADC_init();
+    USART1_Init();   // Modbus RTU
+    USART2_Init();   // Debug
+    ADC_init();
+    LED_Init();
 
-	/* TODO - Add your application code here */
+    USART1->CR1 |= USART_CR1_RXNEIE;   // RX interrupt enable
+    NVIC_EnableIRQ(USART1_IRQn);
 
-	USART1->CR1 |= 0x0020;			//enable RX interrupt
-	NVIC_EnableIRQ(USART1_IRQn); 	//enable interrupt in NVIC
-	__enable_irq();					//global enable IRQs, M3_Generic_User_Guide p135
+    __enable_irq();
 
-	RCC->AHBENR|=1; 				//GPIOA ABH bus clock ON. p154
-	GPIOA->MODER&=~0x00000C00;		//clear (input reset state for PA5). p184
-	GPIOA->MODER|=0x400; 			//GPIOA pin 5 to output. p184
+    /* Modbus request buffer:
+       slave + func + addrH + addrL + qtyH + qtyL + crcL + crcH = 8 bytes */
+    uint8_t request_frame[8] = {0};
 
-	char received_frame[8]={0};
-	/* Infinite loop */
-	unsigned short int crc=0; //16 bitts
-	char crc_high_byte=0;
-	char crc_low_byte=0;
+    uint16_t crc;
+    const char *framingErrorString = "Framing Error Detected";
+    const char *noiseErrorString   = "Noise Error Detected";
 
-	char *framingErrorString = "Framing Error Detected";
-	char *noiseErrorString = "Noise Error Detected";
+    while (1)
+    {
+        if (frameFlag)
+        {
+            write_debug_msg(framingErrorString, 22);
+            frameFlag = 0;
+        }
 
-	while (1)
-	{
-		if (frameFlag == 1)
-		{
-			/* Here we have encountered a framing erorr. It should not occur, but if it does, here we handle it */
-			write_debug_msg(framingErrorString, 22);
-			frameFlag = 0;
-			clear_buffer(received_frame);
-		}
-		if (neFlag == 1)
-		{
-			/* If we have noise error in communication, we handle it here */
-			write_debug_msg(noiseErrorString, 22);
-			neFlag = 0;
-			clear_buffer(received_frame);
-		}
-		if (mFlag == 1 || mFlag == 2) {
-		    // Determine slave address
-		    uint8_t slave_addr = (mFlag == 1) ? 0x01 : 0x02;
+        if (neFlag)
+        {
+            write_debug_msg(noiseErrorString, 22);
+            neFlag = 0;
+        }
 
-		    // Read 7 bytes from USART1
-		    read_7_bytes_from_usartx(&received_frame[1]);
-		    received_frame[0] = slave_addr;
+        /* -------- Modbus request received -------- */
+        if (mFlag == 1 || mFlag == 2)
+        {
+            uint8_t slave_addr = (mFlag == 1) ? 0x01 : 0x02;
 
-		    // Compute CRC
-		    crc = CRC16(received_frame, 6);
-		    crc_high_byte = crc >> 8;
-		    crc_low_byte  = crc & 0xFF;
+            /* First byte (slave addr) already received in ISR */
+            request_frame[0] = slave_addr;
 
-		    // Verify CRC
-		    if (received_frame[7] == crc_high_byte &&
-		        received_frame[6] == crc_low_byte)
-		    {
-		        if (received_frame[3] == 0x01) {
-		            // Read sensor value dynamically
-		            int32_t sensor_value = read_sensor(slave_addr);
-		            if (sensor_value != -9999) {
-		                respond_frame(slave_addr, sensor_value);
-		            }
-		        }
-		    }
+            /* Read remaining 7 bytes */
+            read_modbus_frame(&request_frame[1], 7);
 
-		    mFlag = 0;
-		    USART1->CR1 |= 0x0020;  // Re-enable RX interrupt
-		}
-		else if(mFlag==3) //wrong slave address
-		{
-			wrong_slave_address();
+            /* CRC check (first 6 bytes) */
+            crc = CRC16((char *)request_frame, 6);
 
-			received_frame[0] = 0;
-		}
-	}
+            if (request_frame[6] == (crc & 0xFF) &&
+                request_frame[7] == (crc >> 8))
+            {
+                /* Function 0x04, start addr LSB == 0x01 */
+                if (request_frame[1] == 0x04 &&
+                    request_frame[3] == 0x01)
+                {
+                    int32_t sensor_value = read_sensor(slave_addr);
 
-	return 0;
+                    if (sensor_value != -9999)
+                    {
+                        respond_frame(slave_addr, sensor_value);
+                    }
+                }
+            }
+
+            mFlag = 0;
+            USART1->CR1 |= USART_CR1_RXNEIE;   // re-enable RX interrupt
+        }
+        else if (mFlag == 3)
+        {
+            mFlag = 0;
+            USART1->CR1 |= USART_CR1_RXNEIE;
+        }
+    }
 }
 
 void USART1_IRQHandler(void)
@@ -154,8 +148,9 @@ void USART1_IRQHandler(void)
 
 	if(USART1->SR & 0x0020) 		//if data available in DR register. p737
 	{
-		received_slave_address=USART1->DR;
+		received_slave_address = USART1->DR;
 	}
+
 	if (received_slave_address == 0x01) {
 	    mFlag = 1;   // adc_lmt84lp
 	}
@@ -165,8 +160,8 @@ void USART1_IRQHandler(void)
 	else {
 	    mFlag = 3;   // ignore
 	}
-	USART1->CR1 &= ~0x0020;			//disable RX interrupt
 
+	USART1->CR1 &= ~0x0020;			//disable RX interrupt
 }
 
 /**
@@ -179,7 +174,7 @@ int32_t read_sensor(uint8_t input_address)
 {
     switch(input_address) {
         case 0x01:
-            return read_lmt84lp_celsius_x10();  // temperature
+            return read_lmt84lp_celsius_x100();  // temperature
         case 0x02:
             return read_NLS19M51_lux();         // luminance
         default:
