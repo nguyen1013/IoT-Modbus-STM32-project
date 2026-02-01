@@ -9,8 +9,8 @@
 #include <stdio.h>
 
 #include "timer.h"
-#include "usart.h"
-#include "adc_nsl19m51.h"
+#include "usart2.h"
+#include "./sensors/adc_nsl19m51.h"
 
 /* Private typedef */
 /* Private define  */
@@ -31,22 +31,15 @@ int main(void) {
 	SetSysClock();
 	SystemCoreClockUpdate();
 	USART2_Init();
-	ADC1_init();
-	USART2_write('A');
+	ADC_init();
 
 	/* Infinite loop */
 	while (1) {
-		uint32_t lux100 = read_NLS19M51_time_100();
-
-		uint32_t lux_int = lux100 / 100;
-		uint32_t lux_dec = lux100 % 100;
+		uint16_t lux = read_NLS19M51_lux();
 
 		char buf[64];
 
-		if (lux_dec < 10)
-			sprintf(buf, "Lux=%d.0%d", (int) lux_int, (int) lux_dec);
-		else
-			sprintf(buf, "Lux=%d.%d", (int) lux_int, (int) lux_dec);
+		sprintf(buf, "Lux=%d", (int) lux);
 
 		USART2_WriteString(buf);
 		USART2_write('\r');
