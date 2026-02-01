@@ -8,8 +8,8 @@
 #include <stdlib.h>
 
 #include "timer.h"
-#include "usart.h"
-#include "adc_lmt84lp.h"
+#include "usart2.h"
+#include "./sensors/adc_lmt84lp.h"
 
 /* Private typedef */
 /* Private define  */
@@ -32,18 +32,12 @@ int main(void)
 	SetSysClock();
 	SystemCoreClockUpdate();
 	USART2_Init();
-	ADC0_init();
-	/* TODO - Add your application code here */
-
-	//set up pin PA5 for LED
-	RCC->AHBENR |= 1;				//enable GPIOA clock
-	GPIOA->MODER&=~0x00000C00;	//clear pin mode
-	GPIOA->MODER|=0x00000400;		//set pin PA5 to output model
+	ADC_init();
 
   /* Infinite loop */
 	while (1)
 	{
-	    int32_t temp100 = read_lmt84lp_time_100();
+	    int32_t temp100 = read_lmt84lp_celsius_x100();
 
 	    char buf[64];
 
