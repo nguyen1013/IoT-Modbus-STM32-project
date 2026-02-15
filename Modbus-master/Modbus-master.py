@@ -1,22 +1,18 @@
 import time
-import random
 import serial
 
-port = serial.Serial('COM5', 
-                     baudrate = 9600, 
-                     timeout=2, 
+port = serial.Serial('COM7',
+                     baudrate=9600,
+                     timeout=1,
                      bytesize=serial.EIGHTBITS,
-                     parity=serial.PARITY_NONE, 
-                     stopbits=serial.STOPBITS_ONE,
-                     )
-global received
-port.close()
+                     parity=serial.PARITY_NONE,
+                     stopbits=serial.STOPBITS_ONE)
 
-def modbusCrc(msg:str) -> int:
+def modbus_crc(data: bytes) -> int:
     crc = 0xFFFF
-    for n in range(len(msg)):
-        crc ^= msg[n]
-        for i in range(8):
+    for b in data:
+        crc ^= b
+        for _ in range(8):
             if crc & 1:
                 crc >>= 1
                 crc ^= 0xA001
@@ -24,56 +20,60 @@ def modbusCrc(msg:str) -> int:
                 crc >>= 1
     return crc
 
-#crc = modbusCrc(msg)
-    #01 04 00 01 00 01 60 0A
-    # https://npulse.net/en/online-modbus
-
-def modbus_request(slave_addr, register_addr):
-    # Build request frame: Read 2 input registers
-    msg = [
+def modbus_request(slave_addr: int, register_addr: int) -> int:
+    frame = bytearray([
         slave_addr,
         0x04,
         (register_addr >> 8) & 0xFF,
         register_addr & 0xFF,
         0x00,
-        0x02  # quantity = 2 registers
-    ]
+        0x02
+    ])
+    crc = modbus_crc(frame)
+    frame.append(crc & 0xFF)        # CRC low
+    frame.append((crc >> 8) & 0xFF) # CRC high
 
-    crc = modbusCrc(msg)
-    msg.append(crc & 0xFF)
-    msg.append((crc >> 8) & 0xFF)
+    print("{}: request: {}".format(time.strftime('%Y%m%d:%H%M%S'), frame))
 
-    print("{}: request: {}".format(time.strftime('%Y%m%d:%H%M%S'), msg))
+    for attempt in range(1, 4):
+        try:
+            if not port.is_open:
+                port.open()
 
-    port.open()
-    port.write(msg)
+            port.reset_input_buffer()
+            port.reset_output_buffer()
 
-    # Expected response: 9 bytes
-    received = port.read(9)
-    port.close()
+            port.write(frame)
+            # small pause to let slave respond; tune if needed
+            time.sleep(0.05)
 
-    if len(received) == 9:
-        print("{}: respond: {}".format(time.strftime('%Y%m%d:%H%M%S'), received))
+            resp = port.read(9)  # expected length for 2 registers
+            if len(resp) != 9:
+                raise IOError(f"Short/empty response (len={len(resp)})")
+            else:
+                print("{}: respond: {}".format(time.strftime('%Y%m%d:%H%M%S'), resp))
 
-        # 32-bit big-endian value
-        value = (
-            (received[3] << 24) |
-            (received[4] << 16) |
-            (received[5] << 8)  |
-             received[6]
-        )
+            # CRC check
+            resp_crc = resp[-2] | (resp[-1] << 8)
+            if modbus_crc(resp[:-2]) != resp_crc:
+                raise IOError("CRC mismatch")
 
-        # signed conversion
-        if value & 0x80000000:
-            value -= 0x100000000
+            # parse 32-bit big-endian from bytes 3..6
+            value = (resp[3] << 24) | (resp[4] << 16) | (resp[5] << 8) | resp[6]
+            if value & 0x80000000:
+                value -= 0x100000000
+            return value
 
-    else:
-        value = -9999
-        print("{}: Invalid response length: {}".format(
-            time.strftime('%Y%m%d:%H%M%S'), received))
+        except Exception as e:
+            print(f"{time.strftime('%Y%m%d:%H%M%S')}: attempt {attempt} error: {e}")
+            # clear buffers and small backoff before retry
+            try:
+                port.reset_input_buffer()
+            except Exception:
+                pass
+            time.sleep(0.2 * attempt)
+    return -9999
 
-    time.sleep(1)
-    return value
 
 
 devices = range(0x01, 0x08)
@@ -87,7 +87,37 @@ while True:
     
     # read luminance from slave 0x02
     lux = modbus_request(0x02, 0x01)
-    if lux >=0:
-        print(lux, "Lux")
+    if lux >= 0:
+        print(lux, "Lux") 
+    time.sleep(2)
 
+    # read temperaturex100, humidityx100 from DHT22 (each value using 2 databytes)
+    # Slave packs: ((uint16_t)temp_x100 << 16) | (uint16_t)hum_x100
+    raw_dht = modbus_request(0x01, 0x03)  # adjust slave address if needed
+    if raw_dht != -9999:
+        temp16 = (raw_dht >> 16) & 0xFFFF
+        hum16  = raw_dht & 0xFFFF
+
+        # sign-extend temp16 (if temperature can be negative)
+        if temp16 & 0x8000:
+            temp16 = temp16 - 0x10000
+
+        temperature_c = temp16 / 100.0
+        humidity_pct  = hum16 / 100.0
+
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: DHT22 Temperature = {temperature_c:.2f} °C, Humidity = {humidity_pct:.2f} %RH")
+    else:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: DHT22 read failed")
+
+    time.sleep(2)
+
+    # read eCO2, TVOC from Grove SGP30 (each value using 2 databytes)
+    # Slave packs: ((uint16_t)eco2_ppm << 16) | (uint16_t)tvoc_ppb
+    raw_sgp = modbus_request(0x01, 0x04)  # adjust slave address if needed
+    if raw_sgp != -9999:
+        eco2 = (raw_sgp >> 16) & 0xFFFF
+        tvoc = raw_sgp & 0xFFFF
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: SGP30 eCO2 = {eco2} ppm, TVOC = {tvoc} ppb")
+    else:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: SGP30 read failed")
     time.sleep(2)
