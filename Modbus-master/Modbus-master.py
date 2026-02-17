@@ -21,6 +21,7 @@ def modbus_crc(data: bytes) -> int:
     return crc
 
 def modbus_request(slave_addr: int, register_addr: int) -> int:
+    print()
     frame = bytearray([
         slave_addr,
         0x04,
@@ -79,13 +80,13 @@ def modbus_request(slave_addr: int, register_addr: int) -> int:
 devices = range(0x01, 0x08)
 
 while True:
-    # read temperature from slave 0x01
+    # # read temperature from slave 0x01
     temp_x100 = modbus_request(0x01, 0x01)
     if -5000 <= temp_x100 <= 15000:
         print(temp_x100 / 100, "Celsius")    
     time.sleep(2)
     
-    # read luminance from slave 0x02
+    # # read luminance from slave 0x02
     lux = modbus_request(0x02, 0x01)
     if lux >= 0:
         print(lux, "Lux") 
@@ -93,7 +94,7 @@ while True:
 
     # read temperaturex100, humidityx100 from DHT22 (each value using 2 databytes)
     # Slave packs: ((uint16_t)temp_x100 << 16) | (uint16_t)hum_x100
-    raw_dht = modbus_request(0x01, 0x03)  # adjust slave address if needed
+    raw_dht = modbus_request(0x03, 0x01)  # adjust slave address if needed
     if raw_dht != -9999:
         temp16 = (raw_dht >> 16) & 0xFFFF
         hum16  = raw_dht & 0xFFFF
@@ -113,7 +114,7 @@ while True:
 
     # read eCO2, TVOC from Grove SGP30 (each value using 2 databytes)
     # Slave packs: ((uint16_t)eco2_ppm << 16) | (uint16_t)tvoc_ppb
-    raw_sgp = modbus_request(0x01, 0x04)  # adjust slave address if needed
+    raw_sgp = modbus_request(0x04, 0x01)  # adjust slave address if needed
     if raw_sgp != -9999:
         eco2 = (raw_sgp >> 16) & 0xFFFF
         tvoc = raw_sgp & 0xFFFF
