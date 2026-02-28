@@ -49,5 +49,7 @@ uint16_t read_NLS19M51_lux(void) {
 		USART2_WriteString(buf);
 	}
 
+	USART2_WriteString("\n\r");
+
 	return lux;
 }

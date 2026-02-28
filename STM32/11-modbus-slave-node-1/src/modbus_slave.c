@@ -3,13 +3,16 @@
 #include "usart1.h"
 #include "timer.h"
 #include "usart2.h"
+#include "led_PA5.h"
+
+// RS-485 DE control (PA8)
+#define RS485_DE_PIN  8
+
+#define RS485_DE_HIGH() (GPIOA->BSRR = (1 << RS485_DE_PIN))
+#define RS485_DE_LOW()  (GPIOA->BSRR = (1 << (RS485_DE_PIN + 16)))
+
 
 #define MODBUS_FRAME_SIZE 9
-
-void blink_led();
-#define led_on()	GPIOA->ODR|=0x20; //0010 0000 set bit 5. p186
-#define led_off()	GPIOA->ODR&=~0x20; //0000 0000 clear bit 5. p186
-
 
 unsigned short int CRC16 (char *nData,unsigned short int wLength)
 {
@@ -60,14 +63,15 @@ unsigned short int CRC16 (char *nData,unsigned short int wLength)
 
 }
 
-void read_modbus_frame(uint8_t *rx_buf, uint8_t length)
+void modbus_slave_init(void)
 {
-    for (uint8_t i = 0; i < length; i++)
-    {
-        rx_buf[i] = USART1_read();
-    }
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
-    write_debug_frame(rx_buf, length);
+    // PA8 as output
+    GPIOA->MODER &= ~(3 << (RS485_DE_PIN * 2));
+    GPIOA->MODER |=  (1 << (RS485_DE_PIN * 2));
+
+    RS485_DE_LOW();   // default to receive mode
 }
 
 void respond_frame(uint8_t slave_addr, int32_t sensor_value)
@@ -80,7 +84,6 @@ void respond_frame(uint8_t slave_addr, int32_t sensor_value)
     frame[1] = 0x04;  // Read Input Registers
     frame[2] = 0x04;  // 4 data bytes (2 registers)
 
-    /* Big-endian 32-bit value (Modbus standard) */
     frame[3] = (sensor_value >> 24) & 0xFF;
     frame[4] = (sensor_value >> 16) & 0xFF;
     frame[5] = (sensor_value >> 8)  & 0xFF;
@@ -90,12 +93,21 @@ void respond_frame(uint8_t slave_addr, int32_t sensor_value)
     frame[7] = crc & 0xFF;       // CRC low
     frame[8] = crc >> 8;         // CRC high
 
+    // ---- RS-485 transmit mode ----
+    RS485_DE_HIGH();
+
     for (uint8_t i = 0; i < MODBUS_FRAME_SIZE; i++)
     {
         USART1_write(frame[i]);
     }
 
-    led_off();  // RX mode
+    // Wait until USART1 fully finishes transmission
+    while (!(USART1->SR & USART_SR_TC));
+
+    // ---- Back to receive mode ----
+    RS485_DE_LOW();
+
+    led_off();
 }
 
 void write_debug_msg(const char *str, int32_t maxchars)
@@ -109,13 +121,14 @@ void write_debug_msg(const char *str, int32_t maxchars)
     USART2_write('\n');
 }
 
+
 static const char bytestr[] =
 {
     '0','1','2','3','4','5','6','7',
     '8','9','a','b','c','d','e','f'
 };
 
-void write_debug_frame(const uint8_t *frame, uint8_t length)
+void write_debug_frame(const volatile uint8_t *frame, uint8_t length)
 {
     USART2_WriteString("RX frame: ");
 
@@ -132,12 +145,4 @@ void write_debug_frame(const uint8_t *frame, uint8_t length)
 
     USART2_write('\r');
     USART2_write('\n');
-}
-
-/**
- * Initialize LED
- */
-void LED_Init(void)
-{
-	GPIOA->MODER|=0x400; //GPIOA pin 5 to output. p184
 }
