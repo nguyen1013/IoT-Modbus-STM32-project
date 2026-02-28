@@ -1,7 +1,7 @@
 import time
 import serial
 
-port = serial.Serial('COM7',
+port = serial.Serial('COM13',
                      baudrate=9600,
                      timeout=1,
                      bytesize=serial.EIGHTBITS,
@@ -80,45 +80,100 @@ def modbus_request(slave_addr: int, register_addr: int) -> int:
 devices = range(0x01, 0x08)
 
 while True:
-    # # read temperature from slave 0x01
-    temp_x100 = modbus_request(0x01, 0x01)
-    if -5000 <= temp_x100 <= 15000:
-        print(temp_x100 / 100, "Celsius")    
-    time.sleep(2)
-    
-    # # read luminance from slave 0x02
-    lux = modbus_request(0x02, 0x01)
-    if lux >= 0:
-        print(lux, "Lux") 
-    time.sleep(2)
+    # # -------- Read temperature from slave 0x01 --------
+    # temp_x100 = modbus_request(0x01, 0x01)
 
-    # read temperaturex100, humidityx100 from DHT22 (each value using 2 databytes)
-    # Slave packs: ((uint16_t)temp_x100 << 16) | (uint16_t)hum_x100
-    raw_dht = modbus_request(0x03, 0x01)  # adjust slave address if needed
-    if raw_dht != -9999:
+    # if temp_x100 == -9990:
+    #     print("Temperature Sensor ERROR")
+    # elif -5000 <= temp_x100 <= 15000:
+    #     print(temp_x100 / 100, "Celsius")
+    # else:
+    #     print("Temperature Invalid Response:", temp_x100)
+
+    # time.sleep(2)
+
+
+
+    # # -------- Read luminance from slave 0x02 --------
+    # lux = modbus_request(0x02, 0x01)
+
+    # if lux == -9990:
+    #     print("Luminance Sensor ERROR")
+    # elif lux >= 0:
+    #     print(lux, "Lux")
+    # else:
+    #     print("Luminance Invalid Response:", lux)
+
+    # time.sleep(2)
+
+
+
+    # # read temperaturex100, humidityx100 from DHT22 (each value using 2 databytes)
+    # # Slave packs: ((uint16_t)temp_x100 << 16) | (uint16_t)hum_x100
+    # # -------- Read temperature & humidity from DHT22 (slave 0x03) --------
+    raw_dht = modbus_request(0x03, 0x01)
+
+    if raw_dht == -9990:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: DHT22 Sensor ERROR (-9990)")
+    elif raw_dht == -9999:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: DHT22 read failed (-9999)")
+    else:
         temp16 = (raw_dht >> 16) & 0xFFFF
         hum16  = raw_dht & 0xFFFF
 
-        # sign-extend temp16 (if temperature can be negative)
+        # Sign-extend temperature if negative
         if temp16 & 0x8000:
-            temp16 = temp16 - 0x10000
+            temp16 -= 0x10000
 
         temperature_c = temp16 / 100.0
         humidity_pct  = hum16 / 100.0
 
         print(f"{time.strftime('%Y%m%d:%H%M%S')}: DHT22 Temperature = {temperature_c:.2f} °C, Humidity = {humidity_pct:.2f} %RH")
-    else:
-        print(f"{time.strftime('%Y%m%d:%H%M%S')}: DHT22 read failed")
 
     time.sleep(2)
 
+    # -------- Read eCO2 & TVOC from SGP30 (slave 0x04) --------
     # read eCO2, TVOC from Grove SGP30 (each value using 2 databytes)
     # Slave packs: ((uint16_t)eco2_ppm << 16) | (uint16_t)tvoc_ppb
-    raw_sgp = modbus_request(0x04, 0x01)  # adjust slave address if needed
-    if raw_sgp != -9999:
+    raw_sgp = modbus_request(0x04, 0x01)
+
+    if raw_sgp == -9990:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: SGP30 Sensor ERROR (-9990)")
+    elif raw_sgp == -9999:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: SGP30 read failed (-9999)")
+    else:
         eco2 = (raw_sgp >> 16) & 0xFFFF
         tvoc = raw_sgp & 0xFFFF
         print(f"{time.strftime('%Y%m%d:%H%M%S')}: SGP30 eCO2 = {eco2} ppm, TVOC = {tvoc} ppb")
-    else:
-        print(f"{time.strftime('%Y%m%d:%H%M%S')}: SGP30 read failed")
+
     time.sleep(2)
+
+
+    # -------- Read AC Voltage (slave 0x05) --------
+    voltage_mv = modbus_request(0x05, 0x01)
+
+    if voltage_mv == -9990:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: AC Voltage Sensor ERROR")
+    elif 0 <= voltage_mv <= 24000:
+        voltage_v = voltage_mv / 1000.0
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: AC Voltage = {voltage_v:.2f} V")
+    else:
+        print("AC Voltage Invalid Response:", voltage_mv)
+
+    time.sleep(2)
+
+
+    # -------- Read Power Consumption (slave 0x06) --------
+    power_mw = modbus_request(0x06, 0x01)
+
+    if power_mw == -9990:
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: Power Sensor ERROR")
+    elif 0 <= power_mw <= 24000:
+        power_w = power_mw / 1000.0
+        print(f"{time.strftime('%Y%m%d:%H%M%S')}: Power = {power_w:.2f} W")
+    else:
+        print("Power Invalid Response:", power_mw)
+
+    time.sleep(2)
+
+    
