@@ -14,18 +14,12 @@ int32_t read_lmt84lp_celsius_x100(void) {
 
     /*
      LMT84LP transfer function (approx):
-     T(°C) = (1035mV - Vout) / 5.5
+     T(°C) = 41250/217 - 40*Vout_mV/217
 
      Scaled integer:
-     T×10 = (1035 - Vout) * 100 / 55
+     T×100 = 412500/217 - 400*Vout_mV/217
     */
-    int32_t temp_x100 = (1035 - vout_mv) * 1000 / 55;
-
-    /* Clamp to sensor limits */
-    if (temp_x100 > 15000)
-        temp_x100 = 15000;
-    if (temp_x100 < -5000)
-        temp_x100 = -5000;
+    int32_t temp_x100 = 4125000/217 - 4000*vout_mv/217;
 
     return temp_x100;
 }
