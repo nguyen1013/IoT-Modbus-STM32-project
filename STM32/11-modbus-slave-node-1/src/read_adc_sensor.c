@@ -63,17 +63,17 @@ int32_t read_NLS19M51_lux_median(void) {
     int32_t max = samples[SAMPLE_COUNT - 1];
     int32_t median = samples[SAMPLE_COUNT / 2];
 
-    /* Stability check: max variation = 20% */
-    if (median != 0 && (max - min) > (median / 5))
-    {
-    	USART2_WriteString("ACD values are not stable\n\r");
-        return -9990;
-    }
-
     /* Valid range: 0 to 10000 lux */
     if (median < 0 || median > 10000)
     {
     	USART2_WriteString("Sensor reading error\n\r");
+        return -9990;
+    }
+
+    /* Stability check: max variation = 20% */
+    if (median != 0 && (max - min) > (median / 5))
+    {
+    	USART2_WriteString("ADC values are not stable\n\r");
         return -9990;
     }
 

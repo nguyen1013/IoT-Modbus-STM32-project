@@ -7,6 +7,6 @@
 #include <math.h>
 #include "usart2.h"
 
-uint16_t read_NLS19M51_lux(void);
+int32_t read_NLS19M51_lux(void);
 
 #endif /* ADC_NSL19M51_H_ */
